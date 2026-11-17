@@ -6,10 +6,11 @@ export const ALARM_CHANNEL = 'medication-alarms';
 
 export async function prepareNotifications() {
   if (Platform.OS !== 'android') return;
-  await Notifications.setNotificationChannelAsync(ALARM_CHANNEL, {
-    name: 'Lembretes de saúde', importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 350, 250, 350], sound: 'default', lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-  });
+ await Notifications.setNotificationChannelAsync(ALARM_CHANNEL, {
+  name: 'Lembretes de saúde', importance: Notifications.AndroidImportance.MAX,
+  vibrationPattern: [0, 350, 250, 350],
+  lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+});
   const current = await Notifications.getPermissionsAsync();
   if (!current.granted) await Notifications.requestPermissionsAsync();
 }
@@ -60,12 +61,12 @@ export async function scheduleReminder(reminder: Reminder): Promise<Reminder> {
     ...(Platform.OS === 'android' && exact ? { delivery: 'alarmClock' as const } : {}),
   };
   const notificationId = await Notifications.scheduleNotificationAsync({
-    content: {
-      title: 'Hora do seu cuidado', body: reminder.title,
-      sound: reminder.sound === 'default' ? 'default' : 'default',
-      data: { reminderId: reminder.id, kind: 'alarm' },
-      categoryIdentifier: 'MEDICATION_ALARM',
-    }, trigger,
+   content: {
+  title: 'Hora do seu cuidado', body: reminder.title,
+  sound: true,
+  data: { reminderId: reminder.id, kind: 'alarm' },
+  categoryIdentifier: 'MEDICATION_ALARM',
+}, trigger,
   });
 
   let toleranceNotificationId: string | undefined;

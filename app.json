@@ -1,23 +1,83 @@
 {
   "expo": {
-    "name": "Alarme de Saúde & Família",
+    "name": "Dose Certa",
     "slug": "alarme-saude-familia",
     "scheme": "saude-familia",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
     "plugins": [
-      ["expo-notifications", {"sounds": []}],
-      ["react-native-google-mobile-ads", {
-        "androidAppId": "ca-app-pub-3940256099942544~3347511713"
-      }]
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0F8F7A",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 37,
+            "targetSdkVersion": 36
+          }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "sounds": []
+        }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+        }
+      ]
     ],
+    "build": {
+      "development": {
+        "developmentClient": true,
+        "distribution": "internal",
+        "android": {
+          "buildType": "apk"
+        },
+        "env": {
+          "EXPO_PUBLIC_ADMOB_BANNER_ID": "ca-app-pub-3940256099942544/6300978111"
+        }
+      },
+      "production": {
+        "autoIncrement": true,
+        "android": {
+          "buildType": "app-bundle"
+        },
+        "env": {
+          "EXPO_PUBLIC_ADMOB_BANNER_ID": "process.env.EXPO_PUBLIC_ADMOB_BANNER_ID"
+        }
+      }
+    },
     "android": {
-      "package": "com.example.alarmedesaudefamilia",
+      "package": "com.estaniss.alarmesaudefamilia",
+      "versionCode": 1,
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.POST_NOTIFICATIONS"
-      ]
-    }
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "monochromeImage": "./assets/adaptive-icon-mono.png",
+        "backgroundColor": "#0F8F7A"
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1a540482-87e5-4db6-8eff-9d03b7205987"
+      }
+    },
+    "owner": "estanisss-team"
   }
 }
