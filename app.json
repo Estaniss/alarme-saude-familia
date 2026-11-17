@@ -39,6 +39,27 @@
         }
       ]
     ],
+    "build": {
+      "development": {
+        "developmentClient": true,
+        "distribution": "internal",
+        "android": {
+          "buildType": "apk"
+        },
+        "env": {
+          "EXPO_PUBLIC_ADMOB_BANNER_ID": "ca-app-pub-3940256099942544/6300978111"
+        }
+      },
+      "production": {
+        "autoIncrement": true,
+        "android": {
+          "buildType": "app-bundle"
+        },
+        "env": {
+          "EXPO_PUBLIC_ADMOB_BANNER_ID": "process.env.EXPO_PUBLIC_ADMOB_BANNER_ID"
+        }
+      }
+    },
     "android": {
       "package": "com.estaniss.alarmesaudefamilia",
       "versionCode": 1,
@@ -51,6 +72,12 @@
         "monochromeImage": "./assets/adaptive-icon-mono.png",
         "backgroundColor": "#0F8F7A"
       }
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1a540482-87e5-4db6-8eff-9d03b7205987"
+      }
+    },
+    "owner": "estanisss-team"
   }
 }
