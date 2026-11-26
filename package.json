@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@react-native-community/datetimepicker": "9.2.1",
     "expo": "~58.0.17",
+    "expo-audio": "~58.0.12",
     "expo-build-properties": "~58.x.x",
     "expo-constants": "~58.0.13",
     "expo-dev-client": "~58.0.14",
@@ -28,7 +30,8 @@
     "web": "expo start --web",
     "doctor": "expo-doctor",
     "build:android": "eas build -p android --profile production",
-    "submit:android": "eas submit -p android --profile production"
+    "submit:android": "eas submit -p android --profile production",
+    "dev": "adb reverse tcp:8081 tcp:8081 && expo start --dev-client"
   },
   "private": true
 }

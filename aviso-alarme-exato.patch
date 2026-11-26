@@ -1,0 +1,127 @@
+From 542aa1ccae58acdb4c0492430ae46de9ae18ee7c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 18 Nov 2026 23:46:07 +0000
+Subject: [PATCH] =?UTF-8?q?Avisa=20quando=20falta=20a=20permiss=C3=A3o=20d?=
+ =?UTF-8?q?e=20alarmes=20exatos?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Sem SCHEDULE_EXACT_ALARM o Android entrega o alarme de forma aproximada,
+com janela de até 1 hora. O cartão aparece só quando a permissão falta e
+some assim que ela é concedida (a checagem roda ao voltar para o app).
+---
+ src/App.tsx | 61 +++++++++++++++++++++++++++++++++--------------------
+ 1 file changed, 38 insertions(+), 23 deletions(-)
+
+diff --git a/src/App.tsx b/src/App.tsx
+index 6150c90..ccf5fbc 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -25,6 +25,7 @@ import {
+   ACTION_SNOOZE,
+   cancelReminderNotifications,
+   confirmReminder,
++  hasExactAlarmPermission,
+   notifyFamily,
+   parseNotificationData,
+   prepareNotifications,
+@@ -107,6 +108,12 @@ export default function App() {
+     return rows;
+   }, []);
+ 
++  // null = ainda verificando. Sem a permissão, o Android pode atrasar o alarme em até 1 hora.
++  const [exactOk, setExactOk] = useState<boolean | null>(null);
++  const checkExact = useCallback(async () => {
++    setExactOk(await hasExactAlarmPermission());
++  }, []);
++
+   const lastResponse = Notifications.useLastNotificationResponse();
+   const handledResponses = useRef(new Set<string>());
+ 
+@@ -114,6 +121,7 @@ export default function App() {
+     (async () => {
+       await initRepository();
+       await prepareNotifications();
++      await checkExact();
+       const stored = await refresh();
+       // Renova a janela de agendamentos (alarmes por intervalo e avisos à família).
+       await refreshSchedules(stored);
+@@ -133,6 +141,7 @@ export default function App() {
+ 
+     const appState = AppState.addEventListener("change", (state) => {
+       if (state !== "active") return;
++      void checkExact();
+       void listReminders().then((rows) => {
+         setItems(rows);
+         return refreshSchedules(rows);
+@@ -143,7 +152,7 @@ export default function App() {
+       received.remove();
+       appState.remove();
+     };
+-  }, [refresh]);
++  }, [refresh, checkExact]);
+ 
+   // Toques em notificações e nos botões delas (inclusive com o app fechado).
+   useEffect(() => {
+@@ -262,29 +271,35 @@ export default function App() {
+           >
+             Seus lembretes, no seu ritmo.
+           </Text>
+-          <Pressable
+-            onPress={() => void requestExactAlarmPermission()}
+-            style={({ pressed }) => ({
+-              minHeight: 50,
+-              justifyContent: "center",
+-              paddingHorizontal: 16,
+-              marginBottom: 18,
+-              borderRadius: 14,
+-              backgroundColor: theme.colors.soft,
+-              opacity: pressed ? 0.8 : 1,
+-            })}
+-          >
+-            <Text
+-              style={{ color: theme.colors.primaryDark, fontWeight: "700" }}
+-            >
+-              Configurar alarmes pontuais ›
+-            </Text>
+-            <Text
+-              style={{ color: theme.colors.muted, fontSize: 12, marginTop: 3 }}
++          {exactOk === false && (
++            <Pressable
++              onPress={() => void requestExactAlarmPermission()}
++              accessibilityRole="button"
++              accessibilityLabel="Ativar alarmes exatos. Sem isso o Android pode atrasar os lembretes."
++              style={({ pressed }) => ({
++                minHeight: 56,
++                justifyContent: "center",
++                paddingHorizontal: 16,
++                paddingVertical: 10,
++                marginBottom: 18,
++                borderRadius: 14,
++                borderWidth: 1,
++                borderColor: theme.colors.warning,
++                backgroundColor: "#FBEFEA",
++                opacity: pressed ? 0.8 : 1,
++              })}
+             >
+-              Permissão do Android para horários exatos
+-            </Text>
+-          </Pressable>
++              <Text style={{ color: theme.colors.warning, fontWeight: "700" }}>
++                Ative os alarmes exatos ›
++              </Text>
++              <Text
++                style={{ color: theme.colors.text, fontSize: 13, marginTop: 3 }}
++              >
++                Sem essa permissão, o Android pode atrasar seus lembretes em até
++                1 hora. Toque para ativar e depois volte ao app.
++              </Text>
++            </Pressable>
++          )}
+           <View
+             style={{
+               flexDirection: "row",
+-- 
+2.43.0
+
