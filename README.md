@@ -73,9 +73,10 @@ src/
 ## Fluxo
 
 1. Na primeira execução, o app cria o canal `medication-alarms`, pede permissão de notificações e explica a permissão de alarmes exatos.
-2. Criar/editar lembrete salva no SQLite e agenda o próximo disparo. Pode repetir a cada 1–24 horas ou em dias selecionados; sem intervalo nem dias, repete diariamente no horário informado.
-3. O disparo aparece como notificação. Ao tocá-la, a tela de alarme permite confirmar ou adiar por 10 minutos. Confirmar cancela a notificação de tolerância e agenda a próxima ocorrência.
-4. Com familiar ativado, uma notificação adicional é agendada para `horário + tolerância`. Se ignorada, tocá-la abre o WhatsApp (fallback SMS) com texto preenchido.
+2. Criar/editar lembrete salva no SQLite e agenda os disparos. Sem intervalo, o próprio Android repete o alarme (gatilho diário ou semanal), mesmo sem abrir o app. Com intervalo de 1–24 horas, o app agenda as próximas ocorrências em uma janela de até 7 dias (máx. 30) e renova a janela sempre que o app é aberto.
+3. O disparo aparece como notificação, com os botões "Tomei" e "Adiar 10 min". Confirmar cancela o aviso à família daquela ocorrência; adiar agenda um novo alarme com o seu próprio aviso.
+4. Com familiar ativado, cada ocorrência ganha uma notificação adicional em `horário + tolerância`, com os botões "WhatsApp" e "SMS". Tocar abre o app de mensagens com o texto preenchido (`whatsapp://` com queda para `sms:`). Com o app aberto, aparece um alerta perguntando como avisar. O Android não permite envio sem toque: a pessoa ainda precisa apertar "enviar".
+5. Os avisos à família dependem da janela agendada; se o app não for aberto por mais de uma semana, deixam de ser renovados (o alarme principal continua).
 
 ## Manifesto Android
 
@@ -95,7 +96,7 @@ Se optar por bare React Native/Notifee para `fullScreenAction`, configure o `And
 - Teste em aparelho físico, inclusive após reinício, modo Doze, tela bloqueada e concessão/revogação de acesso a alarmes exatos.
 - Oriente a pessoa a permitir notificações e, quando disponível, remover restrições de bateria para uso confiável. Caminhos variam por fabricante.
 - Reagende ao criar/editar/excluir e ao abrir o app; confira a permissão exata novamente ao voltar das configurações.
-- A demonstração mantém um disparo pendente por lembrete e agenda o próximo ao confirmar ou adiar, além de recalcular os agendamentos ao abrir o app. Para recorrência contínua sem interação, implemente receiver nativo de boot/time-change e agendamento em janela móvel, respeitando limites do Android e repondo ocorrências após cada disparo.
+- Os alarmes sem intervalo usam gatilhos recorrentes do Android. Alarmes por intervalo e avisos à família usam uma janela móvel renovada ao abrir o app. Para renovar sem interação, implemente uma tarefa em segundo plano ou um receiver nativo.
 - A tela adapta-se a fontes maiores, usa rótulos acessíveis e áreas de toque de pelo menos 48 dp.
 - AdMob: o banner de rodapé está implementado. Antes da distribuição, integre consentimento (UMP) conforme região/políticas e inicialize o SDK depois desse fluxo. O starter não mostra interstitial nem rewarded no fluxo de confirmação: anúncios que atrasem uma ação relacionada à saúde podem prejudicar o uso; se adotados, devem ser opt-in, fora do alarme e sem bloquear a tela.
 

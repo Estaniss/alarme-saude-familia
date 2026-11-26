@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import {
   Alert,
+  AppState,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -17,13 +18,23 @@ import {
 import * as Notifications from "expo-notifications";
 import { AdFooter } from "./components/AdFooter";
 import { ReminderCard } from "./components/ReminderCard";
+import { NumberInput, PhoneInput, TimeInput } from "./components/MaskedInputs";
 import {
+  ACTION_CONFIRM,
+  ACTION_SMS,
+  ACTION_SNOOZE,
   cancelReminderNotifications,
+  confirmReminder,
+  hasExactAlarmPermission,
   notifyFamily,
+  parseNotificationData,
   prepareNotifications,
+  refreshSchedules,
   requestExactAlarmPermission,
   scheduleReminder,
+  snoozeReminder,
 } from "./services/alarmService";
+import { isValidPhoneBR, isValidTime } from "./utils/masks";
 import {
   deleteReminder,
   initRepository,
@@ -34,13 +45,44 @@ import { theme } from "./theme";
 import { Reminder } from "./types";
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    const data = parseNotificationData(notification.request.content.data);
+    // Com o app aberto, o aviso à família vira um alerta próprio (sem banner duplicado).
+    const asksInApp = data?.kind === "tolerance";
+    return {
+      shouldShowBanner: !asksInApp,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    };
+  },
 });
+
+const MESSAGE_ERROR_TITLE = "Não foi possível abrir a mensagem";
+const MESSAGE_ERROR_BODY =
+  "Verifique se o WhatsApp ou o aplicativo de SMS está instalado neste aparelho.";
+
+async function sendFamilyMessage(
+  phone: string,
+  medicine: string,
+  via: "whatsapp" | "sms",
+  occurrence?: number,
+) {
+  const ok = await notifyFamily(phone, medicine, via, occurrence);
+  if (!ok) Alert.alert(MESSAGE_ERROR_TITLE, MESSAGE_ERROR_BODY);
+}
+
+function askToNotifyFamily(phone: string, medicine: string, occurrence?: number) {
+  Alert.alert(
+    "Lembrete sem confirmação",
+    `Você não confirmou “${medicine}”. Avisar a pessoa de confiança?`,
+    [
+      { text: "Agora não", style: "cancel" },
+      { text: "SMS", onPress: () => void sendFamilyMessage(phone, medicine, "sms", occurrence) },
+      { text: "WhatsApp", onPress: () => void sendFamilyMessage(phone, medicine, "whatsapp", occurrence) },
+    ],
+  );
+}
 const fresh = (): Reminder => ({
   id: `${Date.now()}`,
   title: "",
@@ -60,89 +102,112 @@ export default function App() {
   const [editing, setEditing] = useState<Reminder | null>(null);
   const [active, setActive] = useState<Reminder | null>(null);
 
-  const refresh = async () => setItems(await listReminders());
+  const refresh = useCallback(async () => {
+    const rows = await listReminders();
+    setItems(rows);
+    return rows;
+  }, []);
+
+  // null = ainda verificando. Sem a permissão, o Android pode atrasar o alarme em até 1 hora.
+  const [exactOk, setExactOk] = useState<boolean | null>(null);
+  const checkExact = useCallback(async () => {
+    setExactOk(await hasExactAlarmPermission());
+  }, []);
+
+  const lastResponse = Notifications.useLastNotificationResponse();
+  const handledResponses = useRef(new Set<string>());
+
   useEffect(() => {
     (async () => {
       await initRepository();
       await prepareNotifications();
-      const stored = await listReminders();
-      const pendingIds = new Set(
-        (await Notifications.getAllScheduledNotificationsAsync()).map(
-          (n) => n.identifier,
-        ),
-      );
-      for (const reminder of stored) {
-        if (
-          reminder.enabled &&
-          (!reminder.notificationId || !pendingIds.has(reminder.notificationId))
-        )
-          await saveReminder(await scheduleReminder(reminder));
-      }
-      await refresh();
-      await Notifications.setNotificationCategoryAsync("MEDICATION_ALARM", [
-        {
-          identifier: "CONFIRM",
-          buttonTitle: "Tomei",
-          options: { opensAppToForeground: true },
-        },
-        {
-          identifier: "SNOOZE",
-          buttonTitle: "Adiar 10 min",
-          options: { opensAppToForeground: true },
-        },
-      ]);
-    })();
+      await checkExact();
+      const stored = await refresh();
+      // Renova a janela de agendamentos (alarmes por intervalo e avisos à família).
+      await refreshSchedules(stored);
+    })().catch((error) => console.warn("Falha ao iniciar o app", error));
+
     const received = Notifications.addNotificationReceivedListener((n) => {
-      const data = n.request.content.data as any;
-      if (data.kind === "alarm")
+      const data = parseNotificationData(n.request.content.data);
+      if (!data) return;
+      if (data.kind === "alarm") {
         void listReminders().then((rows) =>
           setActive(rows.find((i) => i.id === data.reminderId) ?? null),
         );
+      } else if (data.phone) {
+        askToNotifyFamily(data.phone, data.medicine ?? "lembrete", data.occurrence);
+      }
     });
-    const response = Notifications.addNotificationResponseReceivedListener(
-      async (r) => {
-        const data = r.notification.request.content.data as any;
-        if (data.kind === "tolerance") {
-          await notifyFamily(String(data.phone), String(data.medicine));
-          return;
-        }
-        const found = (await listReminders()).find(
-          (i) => i.id === data.reminderId,
-        );
-        if (found && r.actionIdentifier === "CONFIRM") {
-          if (found.toleranceNotificationId)
-            await Notifications.cancelScheduledNotificationAsync(
-              found.toleranceNotificationId,
-            ).catch(() => undefined);
-          await saveReminder(await scheduleReminder(found));
-          await refresh();
-        } else if (found && r.actionIdentifier === "SNOOZE") {
-          setActive(found);
-          void finishAlarm(true, found);
-        } else if (found) setActive(found);
-      },
-    );
+
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      void checkExact();
+      void listReminders().then((rows) => {
+        setItems(rows);
+        return refreshSchedules(rows);
+      });
+    });
+
     return () => {
       received.remove();
-      response.remove();
+      appState.remove();
     };
-  }, []);
+  }, [refresh, checkExact]);
+
+  // Toques em notificações e nos botões delas (inclusive com o app fechado).
+  useEffect(() => {
+    if (!lastResponse) return;
+    const { notification, actionIdentifier } = lastResponse;
+    const key = `${notification.request.identifier}:${actionIdentifier}:${notification.date}`;
+    if (handledResponses.current.has(key)) return;
+    handledResponses.current.add(key);
+
+    (async () => {
+      const data = parseNotificationData(notification.request.content.data);
+      if (!data) return;
+
+      if (data.kind === "tolerance") {
+        if (!data.phone) return;
+        const via = actionIdentifier === ACTION_SMS ? "sms" : "whatsapp";
+        await sendFamilyMessage(data.phone, data.medicine ?? "lembrete", via, data.occurrence);
+        return;
+      }
+
+      const found = (await listReminders()).find((i) => i.id === data.reminderId);
+      if (!found) return;
+      if (actionIdentifier === ACTION_CONFIRM) {
+        await confirmReminder(found.id);
+        await refresh();
+      } else if (actionIdentifier === ACTION_SNOOZE) {
+        await snoozeReminder(found);
+        await refresh();
+      } else {
+        setActive(found);
+      }
+    })().catch((error) => console.warn("Falha ao tratar a notificação", error));
+  }, [lastResponse, refresh]);
 
   const persist = async (draft: Reminder) => {
     if (!draft.title.trim()) {
       Alert.alert("Informe o lembrete", "Digite o nome do remédio ou cuidado.");
       return;
     }
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(draft.time)) {
+    if (!isValidTime(draft.time)) {
       Alert.alert("Horário inválido", "Use o formato 24h, como 08:30.");
       return;
     }
-    if (draft.notifyFamily && !draft.familyPhone.trim()) {
-      Alert.alert(
-        "Falta o contato",
-        "Informe o telefone da pessoa de confiança.",
-      );
-      return;
+    if (draft.notifyFamily) {
+      if (!isValidPhoneBR(draft.familyPhone)) {
+        Alert.alert(
+          "Telefone inválido",
+          "Informe o DDD e o número da pessoa de confiança, como (16) 99999-8888.",
+        );
+        return;
+      }
+      if (draft.toleranceMinutes < 1) {
+        Alert.alert("Tolerância inválida", "Informe quantos minutos esperar (de 1 a 120).");
+        return;
+      }
     }
     const scheduled = await scheduleReminder(draft);
     await saveReminder(scheduled);
@@ -156,38 +221,10 @@ export default function App() {
     await refresh();
   };
 
-  const finishAlarm = async (
-    snooze = false,
-    selected: Reminder | null = active,
-  ) => {
+  const finishAlarm = async (snooze = false, selected: Reminder | null = active) => {
     if (!selected) return;
-    const item = selected;
-    if (item.toleranceNotificationId)
-      await Notifications.cancelScheduledNotificationAsync(
-        item.toleranceNotificationId,
-      ).catch(() => undefined);
-    if (snooze) {
-      const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "Lembrete adiado",
-          body: item.title,
-          data: { reminderId: item.id, kind: "alarm" },
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds: 600,
-          channelId: "medication-alarms",
-        },
-      });
-      await saveReminder({
-        ...item,
-        hasFired: true,
-        notificationId: id,
-        toleranceNotificationId: undefined,
-      });
-    } else {
-      await saveReminder(await scheduleReminder({ ...item, hasFired: true }));
-    }
+    if (snooze) await snoozeReminder(selected);
+    else await confirmReminder(selected.id);
     setActive(null);
     await refresh();
   };
@@ -234,29 +271,35 @@ export default function App() {
           >
             Seus lembretes, no seu ritmo.
           </Text>
-          <Pressable
-            onPress={() => void requestExactAlarmPermission()}
-            style={({ pressed }) => ({
-              minHeight: 50,
-              justifyContent: "center",
-              paddingHorizontal: 16,
-              marginBottom: 18,
-              borderRadius: 14,
-              backgroundColor: theme.colors.soft,
-              opacity: pressed ? 0.8 : 1,
-            })}
-          >
-            <Text
-              style={{ color: theme.colors.primaryDark, fontWeight: "700" }}
+          {exactOk === false && (
+            <Pressable
+              onPress={() => void requestExactAlarmPermission()}
+              accessibilityRole="button"
+              accessibilityLabel="Ativar alarmes exatos. Sem isso o Android pode atrasar os lembretes."
+              style={({ pressed }) => ({
+                minHeight: 56,
+                justifyContent: "center",
+                paddingHorizontal: 16,
+                paddingVertical: 10,
+                marginBottom: 18,
+                borderRadius: 14,
+                borderWidth: 1,
+                borderColor: theme.colors.warning,
+                backgroundColor: "#FBEFEA",
+                opacity: pressed ? 0.8 : 1,
+              })}
             >
-              Configurar alarmes pontuais ›
-            </Text>
-            <Text
-              style={{ color: theme.colors.muted, fontSize: 12, marginTop: 3 }}
-            >
-              Permissão do Android para horários exatos
-            </Text>
-          </Pressable>
+              <Text style={{ color: theme.colors.warning, fontWeight: "700" }}>
+                Ative os alarmes exatos ›
+              </Text>
+              <Text
+                style={{ color: theme.colors.text, fontSize: 13, marginTop: 3 }}
+              >
+                Sem essa permissão, o Android pode atrasar seus lembretes em até
+                1 hora. Toque para ativar e depois volte ao app.
+              </Text>
+            </Pressable>
+          )}
           <View
             style={{
               flexDirection: "row",
@@ -381,17 +424,16 @@ export default function App() {
                     />
                   </Field>
                   <Field label="Horário (24h)">
-                    <TextInput
+                    <TimeInput
                       accessibilityLabel="Horário no formato 24 horas"
                       value={editing.time}
                       onChangeText={(time) => setEditing({ ...editing, time })}
-                      keyboardType="numbers-and-punctuation"
-                      placeholder="08:00"
                       style={inputStyle}
                     />
                   </Field>
                   <Field label="Repetir a cada (horas, opcional)">
-                    <TextInput
+                    <NumberInput
+                      maxLength={2}
                       accessibilityLabel="Intervalo de repetição em horas"
                       value={
                         editing.intervalHours
@@ -407,7 +449,6 @@ export default function App() {
                             : undefined,
                         })
                       }
-                      keyboardType="number-pad"
                       placeholder="Ex.: 4"
                       style={inputStyle}
                     />
@@ -502,7 +543,7 @@ export default function App() {
                         Notificar familiar se não confirmar
                       </Text>
                       <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
-                        O app prepara uma mensagem para você enviar.
+                        Você recebe um aviso para enviar uma mensagem à pessoa de confiança.
                       </Text>
                     </View>
                     <Switch
@@ -515,45 +556,43 @@ export default function App() {
                   </View>
                   {editing.notifyFamily && (
                     <>
-                      <Field label="Telefone com código do país">
-                        <TextInput
-                          accessibilityLabel="Telefone do familiar com código do país"
+                      <Field label="Telefone com DDD">
+                        <PhoneInput
+                          accessibilityLabel="Telefone do familiar com DDD"
                           value={editing.familyPhone}
                           onChangeText={(familyPhone) =>
                             setEditing({ ...editing, familyPhone })
                           }
-                          keyboardType="phone-pad"
-                          placeholder="5511999999999"
                           style={inputStyle}
                         />
                       </Field>
                       <Field label="Tempo de tolerância (minutos)">
-                        <TextInput
+                        <NumberInput
                           accessibilityLabel="Minutos de tolerância"
-                          value={String(editing.toleranceMinutes)}
+                          value={
+                            editing.toleranceMinutes
+                              ? String(editing.toleranceMinutes)
+                              : ""
+                          }
                           onChangeText={(v) =>
                             setEditing({
                               ...editing,
-                              toleranceMinutes: Math.max(1, Number(v) || 1),
+                              toleranceMinutes: Math.min(120, Number(v) || 0),
                             })
                           }
-                          keyboardType="number-pad"
+                          placeholder="10"
                           style={inputStyle}
                         />
-                      </Field>{" "}
-                      <Field label="Tempo de tolerância (minutos)">
-                        <TextInput
-                          accessibilityLabel="Minutos de tolerância"
-                          value={String(editing.toleranceMinutes)}
-                          onChangeText={(v) =>
-                            setEditing({
-                              ...editing,
-                              toleranceMinutes: Math.max(1, Number(v) || 1),
-                            })
-                          }
-                          keyboardType="number-pad"
-                          style={inputStyle}
-                        />
+                        <Text
+                          style={{
+                            color: theme.colors.muted,
+                            fontSize: 13,
+                            marginTop: 6,
+                          }}
+                        >
+                          Se você não confirmar nesse prazo, o app avisa para
+                          enviar a mensagem por WhatsApp ou SMS.
+                        </Text>
                       </Field>
                     </>
                   )}
@@ -624,7 +663,7 @@ export default function App() {
         <Modal
           visible={!!active}
           animationType="fade"
-          onRequestClose={() => void finishAlarm()}
+          onRequestClose={() => setActive(null)}
         >
           <SafeAreaView
             style={{

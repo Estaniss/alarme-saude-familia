@@ -28,7 +28,16 @@
       [
         "expo-notifications",
         {
-          "sounds": []
+          "icon": "./assets/notification-icon.png",
+          "color": "#0F8F7A",
+          "sounds": [
+            "./assets/sounds/tom_sino.mp3",
+            "./assets/sounds/tom_suave.mp3",
+            "./assets/sounds/tom_gota.mp3",
+            "./assets/sounds/tom_despertador.mp3",
+            "./assets/sounds/tom_digital.mp3",
+            "./assets/sounds/tom_urgente.mp3"
+          ]
         }
       ],
       [
